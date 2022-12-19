@@ -1,4 +1,6 @@
+using System;
 using System.Collections.Generic;
+using HideAndSeek.Roles;
 using OWML.Common;
 using QSB.Player;
 using UnityEngine;
@@ -9,9 +11,11 @@ namespace HideAndSeek{
         public static HashSet<PlayerInfo> hiders = new();
         public static HashSet<PlayerInfo> seekers = new();
 
-        public static Dictionary<PlayerInfo, HideAndSeekInfo> playerInfo = new();
+        public static Dictionary<PlayerInfo, RoleHandler> playerInfo = new();
 
         public static PlayerState LocalPlayerState;
+
+        public static event Action<PlayerState> OnLocalPlayerStateChange;
 
         public static void RemovePlayer(PlayerInfo playerInfo){
             PlayerManager.playerInfo.Remove(playerInfo);
@@ -22,81 +26,55 @@ namespace HideAndSeek{
         public static void SetPlayerState(PlayerInfo playerInfo, PlayerState state){
             //if (!PlayerManager.playerInfo.ContainsKey(playerInfo)){
             //    PlayerManager.playerInfo.Add(playerInfo, new HideAndSeekInfo());
-            //}
-
-            if (playerInfo.IsLocalPlayer)
-                LocalPlayerState = state;
+            //}            
             
             switch (state){
                 case PlayerState.Hiding:
                     hiders.Add(playerInfo);
                     seekers.Remove(playerInfo);
-                    SetupHider(PlayerManager.playerInfo[playerInfo]);
+                    PlayerManager.playerInfo[playerInfo].ChangeToHider();
                     break;
                 case PlayerState.Seeking:
                     hiders.Remove(playerInfo);
                     seekers.Add(playerInfo);
-                    SetupSeeker(PlayerManager.playerInfo[playerInfo]);
+                    PlayerManager.playerInfo[playerInfo].ChangeToSeeker();
                     break;
                 case  PlayerState.Spectating:
                     hiders.Remove(playerInfo);
                     seekers.Remove(playerInfo);
-                    SetupSeeker(PlayerManager.playerInfo[playerInfo]);
+                    PlayerManager.playerInfo[playerInfo].ChangeToSpectator();
                     break;
                 case PlayerState.None:
                     Utils.WriteLine("Player Set to None State", MessageType.Error);
                     break;
+            }
+
+            if (playerInfo.IsLocalPlayer){
+                LocalPlayerState = state;
+                OnLocalPlayerStateChange?.Invoke(state);
             }
         }
 
         //This should run once every loop to initialize everything needed for Hide and Seek
         public static void SetupPlayer(PlayerInfo playerInfo){
             HideAndSeek.instance.ModHelper.Events.Unity.RunWhen(() => playerInfo.Body != null, () => {
-                Utils.WriteLine("Setting up " + playerInfo.Name + ": ", MessageType.Debug);
-                
-                if (!PlayerManager.playerInfo.ContainsKey(playerInfo)){
-                    //This part should only need to be ran once or when 
-                    HideAndSeekInfo info = playerInfo.IsLocalPlayer ? new LocalInfo() : new RemoteInfo();
-                    info.playerInfo = playerInfo;
-                    info.state = PlayerState.None;
-                    info.isSetup = true;
+                if (playerInfo.Body.GetComponentInChildren<RoleHandler>() == null)
+                {
+                    Utils.WriteLine("Setting up " + playerInfo.Name + ": ", MessageType.Debug);
 
-                    PlayerManager.playerInfo.Add(playerInfo, info);
+                    GameObject hideAndSeekRoleHandler = new("HideAndSeekRoleHandler");
+                    hideAndSeekRoleHandler.transform.parent = playerInfo.Body.transform;
+                    hideAndSeekRoleHandler.transform.localPosition = Vector3.zero;
+                    hideAndSeekRoleHandler.transform.localRotation = Quaternion.identity;
+                    RoleHandler roleHandler = hideAndSeekRoleHandler.AddComponent<RoleHandler>();
+
+                    roleHandler.Init(playerInfo);
                 }
-                
-                if (playerInfo.IsLocalPlayer){ //Technically Double check lol
-                    Utils.WriteLine("Local Player! Skipping Adding Audio Signal", MessageType.Info);
-                    return;
-                }
-                
-                //Everyone gets an audio signal
-                Utils.WriteLine("Adding Audio Signal", MessageType.Success);
-                AudioSignal signal = playerInfo.Body.AddComponent<AudioSignal>();
-                
-                Utils.WriteLine("Add the known signal for the local player", MessageType.Success);
-                signal._name = SignalName.RadioTower;
-                signal._frequency = SignalFrequency.HideAndSeek;
-
-                PlayerManager.playerInfo[playerInfo].signal = signal;
-
-                SetPlayerState(playerInfo, PlayerManager.playerInfo[playerInfo].state);
             });
         }
 
         
-        public static void SetupHider(HideAndSeekInfo info){
-            info.SetupHider();
-        }
-        
-        public static void SetupSeeker(HideAndSeekInfo info){
-            info.SetupSeeker();
-        }
-        
-        public static void SetupSpectator(HideAndSeekInfo info){
-            info.SetupSpectator();
-        }
-        
-        public static void SetPlayerSignalSize(HideAndSeekInfo info){
+        public static void SetPlayerSignalSize(PlayerInfo info){
             //PlayerTransformSync.LocalInstance?.ReferenceSector?.AttachedObject.GetRootSector();
             //TODO :: WHEN ADDED TO QSB
         }
